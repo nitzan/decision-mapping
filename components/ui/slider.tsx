@@ -24,7 +24,7 @@ export const Slider = React.forwardRef<
       type="range"
       value={numValue}
       onChange={handleChange}
-      className={`w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 ${className}`}
+      className={`w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary ${className}`}
       {...props}
     />
   );

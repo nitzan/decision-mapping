@@ -465,7 +465,7 @@ export default function SeatsAtTheTableDecisionMapper() {
                             cx={sp.x}
                             cy={sp.y}
                             r={isSelected ? 8 : 6}
-                            className={fillClass}
+                            className={`${fillClass} ${p.isNamed ? "cursor-grab" : "cursor-not-allowed"}`}
                             opacity={isSelected ? 1 : p.isNamed ? 0.9 : 0.35}
                             onMouseDown={(ev) => {
                               // Always allow selecting.
@@ -478,7 +478,6 @@ export default function SeatsAtTheTableDecisionMapper() {
                               setDragOptionId(p.id);
                               dragModeRef.current = "option";
                             }}
-                            style={{ cursor: p.isNamed ? "grab" : "not-allowed" }}
                           />
                           <text x={sp.x + 10} y={sp.y + 4} className="fill-muted-foreground" fontSize={12}>
                             {p.displayName}
@@ -494,14 +493,13 @@ export default function SeatsAtTheTableDecisionMapper() {
                         cx={p.x}
                         cy={p.y}
                         r={7}
-                        className="fill-background stroke-primary"
+                        className="fill-background stroke-primary cursor-grab"
                         strokeWidth={2}
                         onMouseDown={(ev) => {
                           ev.preventDefault();
                           setDragPolyIdx(i);
                           dragModeRef.current = "poly";
                         }}
-                        style={{ cursor: "grab" }}
                       />
                     ))}
 
