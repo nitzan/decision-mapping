@@ -37,8 +37,8 @@ export default async function ToolPage({ params }: { params: Promise<{ folder: s
         </div>
         <figure className="sheet-preview">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={t.preview} alt={`Preview of the ${t.name} worksheet`} width={935} height={1210} />
-          <figcaption>Letter size, one page. Print and fill in by hand.</figcaption>
+          <img src={t.preview} alt={`First page of ${t.name}`} width={935} height={1210} />
+          <figcaption>{t.caption || "Letter size, one page. Print and fill in by hand."}</figcaption>
         </figure>
       </main>
     </div>

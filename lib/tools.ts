@@ -8,6 +8,7 @@ export type Tool = {
   slug?: string;
   file?: string;
   preview?: string;
+  caption?: string;
   from?: string;
 };
 
@@ -91,6 +92,50 @@ export const FOLDERS: Folder[] = [
         slug: "practice-notebook",
         file: "/worksheets/practice-notebook.pdf",
         preview: "/worksheets/practice-notebook.jpg",
+        download: true,
+      },
+    ],
+  },
+  {
+    slug: "facilitation-guides",
+    name: "Facilitation Guides",
+    about:
+      "Conversation sheets from the All Fours dinners, a series of dinners around Miranda July's novel. Print them for your own table and let the prompts do the hosting.",
+    tools: [
+      {
+        name: "All Fours Dinner #1",
+        kind: "Facilitation guide · PDF",
+        about:
+          "Hold introductions, start with what the book meant to you, then go around the table: when do you perform, when are you misunderstood, what moves you. Made for 25 guests, printed two or three per table.",
+        href: "/facilitation-guides/all-fours-dinner-1",
+        slug: "all-fours-dinner-1",
+        file: "/guides/all-fours-dinner-1.pdf",
+        preview: "/guides/all-fours-dinner-1.jpg",
+        caption: "Four sheets, one per course. Print two or three per table.",
+        download: true,
+      },
+      {
+        name: "All Fours Dinner #2",
+        kind: "Facilitation guide · PDF",
+        about:
+          "Resist introductions and draw your world instead. Then: where does caring start, how do you love something you don't know, where do you look for yourself, how much is enough.",
+        href: "/facilitation-guides/all-fours-dinner-2",
+        slug: "all-fours-dinner-2",
+        file: "/guides/all-fours-dinner-2.pdf",
+        preview: "/guides/all-fours-dinner-2.jpg",
+        caption: "One sheet. Print one per guest.",
+        download: true,
+      },
+      {
+        name: "All Fours Dinner #3",
+        kind: "Facilitation guide · PDF",
+        about:
+          "No introductions. Sit opposite each other and ask: who holds the camera, what is the slowest thing you do, who is the most successful person you know, whose story are you telling.",
+        href: "/facilitation-guides/all-fours-dinner-3",
+        slug: "all-fours-dinner-3",
+        file: "/guides/all-fours-dinner-3.pdf",
+        preview: "/guides/all-fours-dinner-3.jpg",
+        caption: "Two pages. Print one per two people, sitting opposite each other.",
         download: true,
       },
     ],

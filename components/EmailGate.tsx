@@ -44,10 +44,10 @@ export default function EmailGate({ file, name }: { file: string; name: string }
         localStorage.setItem(KEY, email.trim());
       } catch {}
       setState("done");
-      setNote(res.ok ? "Check your inbox to confirm your subscription." : "We couldn't add you to the newsletter just now, but the worksheet is yours.");
+      setNote(res.ok ? "Check your inbox to confirm your subscription." : "We couldn't add you to the newsletter just now, but the PDF is yours.");
     } catch {
       setState("done");
-      setNote("We couldn't add you to the newsletter just now, but the worksheet is yours.");
+      setNote("We couldn't add you to the newsletter just now, but the PDF is yours.");
     }
   }
 
@@ -75,7 +75,7 @@ export default function EmailGate({ file, name }: { file: string; name: string }
       </label>
       <input className="gate-trap" tabIndex={-1} autoComplete="off" aria-hidden="true" value={trap} onChange={(e) => setTrap(e.target.value)} name="company" />
       <button className="btn gate-btn" type="submit" disabled={state === "sending"}>
-        {state === "sending" ? "Sending…" : "Get the worksheet"}
+        {state === "sending" ? "Sending…" : "Get the PDF"}
       </button>
       {state === "error" && <p className="gate-note gate-error">{note}</p>}
     </form>
