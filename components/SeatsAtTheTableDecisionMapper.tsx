@@ -1,670 +1,944 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
-import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, ArrowRight } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /**
- * Seats at the Table — Decision Journey Mapper (short, stable build)
+ * Seats at the Table — Decision journey mapping
+ * Nitzan Hermon, In Process Coaching
  *
- * Requirements implemented:
- * - Intake copy: "Write your considerations freely."
- * - Unnamed options are greyed out, start away from preference, and are NOT draggable
- * - Named options become draggable on the 2D map (dims[0], dims[1])
- * - Lightweight dev tests for NLP parsing
- * - Footer: Nitzan Hermon + in-process.net
+ * Follows the method step by step:
+ * 1. Aspects        list the aspects of a decision
+ * 2. Constellation  arrange them spatially
+ * 3. Axes           draw each as a line with values on each side; choose which get a seat
+ * 4. Balance        set the desired region (jagged is fine)
+ * 5. Options        plot the options and write the reasoning
+ * 6. Camera moves   repeat when the perspective, opportunity or idea changes
  */
 
-// -------------------- utils --------------------
-const uid = () => Math.random().toString(36).slice(2, 9);
-const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+// ---------------------------------------------------------------- types
+type Pt = { x: number; y: number };
+type Aspect = {
+  id: string;
+  name: string;
+  label: Pt; // where the name sits on the page
+  a: Pt; // start of the axis line
+  b: Pt; // end of the axis line
+  aLabel: string;
+  bLabel: string;
+  seated: boolean;
+  ideal: number; // 0..1 along a -> b
+  room: number; // tolerance either side of ideal, 0..0.5
+};
+type Option = { id: string; name: string; values: Record<string, number>; reasoning: string };
+type MapState = { title: string; aspects: Aspect[]; options: Option[] };
+type MoveKind = "perspective" | "opportunity" | "idea";
+type Snapshot = { id: string; at: string; kind: MoveKind; note: string; state: MapState };
+type Store = MapState & { step: number; snapshots: Snapshot[] };
+type Fit = { status: "inside" | "edge" | "outside" | "unplaced"; misses: Aspect[] };
+type Drag =
+  | { kind: "label"; id: string; from: Pt; start: Aspect }
+  | { kind: "end"; id: string; which: "a" | "b" }
+  | { kind: "ideal"; id: string }
+  | { kind: "value"; id: string; optId: string }
+  | null;
+
+// ---------------------------------------------------------------- constants
+const W = 1000;
+const H = 700;
+const STORE_KEY = "seats-at-the-table:v2";
+const STEPS = [
+  { n: 1, name: "Aspects", chip: "List the aspects" },
+  { n: 2, name: "Constellation", chip: "Arrange the constellation" },
+  { n: 3, name: "Axes", chip: "Open up each axis" },
+  { n: 4, name: "Balance", chip: "Desired space of decisions" },
+  { n: 5, name: "Options", chip: "Place options" },
+  { n: 6, name: "Camera moves", chip: "When the camera moves" },
+];
+const MOVE_LABEL: Record<MoveKind, string> = {
+  perspective: "New perspective",
+  opportunity: "New opportunity",
+  idea: "New idea",
+};
+
+// ---------------------------------------------------------------- utils
+const uid = () => Math.random().toString(36).slice(2, 10);
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+const lerp = (a: Pt, b: Pt, t: number): Pt => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+const project = (p: Pt, a: Pt, b: Pt) => {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy || 1;
+  return clamp(((p.x - a.x) * dx + (p.y - a.y) * dy) / len2, 0, 1);
+};
+const clampPt = (p: Pt): Pt => ({ x: clamp(p.x, 24, W - 24), y: clamp(p.y, 24, H - 24) });
 const cn = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(" ");
 
-function pointInPolygon(p: { x: number; y: number }, poly: Array<{ x: number; y: number }>) {
-  // Ray casting point-in-polygon
+function pointInPolygon(p: Pt, poly: Pt[]) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const xi = poly[i].x,
-      yi = poly[i].y;
-    const xj = poly[j].x,
-      yj = poly[j].y;
-    const hit = yi > p.y !== yj > p.y && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi + 1e-9) + xi;
-    if (hit) inside = !inside;
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+    if (yi > p.y !== yj > p.y && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi + 1e-9) + xi) inside = !inside;
   }
   return inside;
 }
 
-function makeDefaultPoly() {
-  return [
-    { x: 0.25, y: 0.15 },
-    { x: 0.85, y: 0.25 },
-    { x: 0.75, y: 0.8 },
-    { x: 0.35, y: 0.9 },
-    { x: 0.2, y: 0.55 },
-  ];
+/** Order aspects by the angle of their ideal point around the shared centroid, so the region never self-intersects. */
+function orderForRegion(aspects: Aspect[]) {
+  const pts = aspects.map((a) => ({ a, p: lerp(a.a, a.b, a.ideal) }));
+  if (!pts.length) return [] as Aspect[];
+  const c = { x: pts.reduce((s, q) => s + q.p.x, 0) / pts.length, y: pts.reduce((s, q) => s + q.p.y, 0) / pts.length };
+  return pts.sort((m, n) => Math.atan2(m.p.y - c.y, m.p.x - c.x) - Math.atan2(n.p.y - c.y, n.p.x - c.x)).map((q) => q.a);
 }
 
-// -------------------- NLP-lite intake --------------------
-function normalizeText(raw: string) {
-  return (raw || "")
-    .replaceAll("•", "\n")
-    .replaceAll("·", "\n")
-    .replaceAll("\r", "")
-    .trim();
+function defaultAxis(label: Pt, len = 300): { a: Pt; b: Pt } {
+  const y = clamp(label.y + 30, 24, H - 24);
+  let x0 = label.x - len / 2;
+  x0 = clamp(x0, 40, W - 40 - len);
+  return { a: { x: x0, y }, b: { x: x0 + len, y } };
 }
 
-function splitCandidates(raw: string) {
-  const t = normalizeText(raw);
-  if (!t) return [] as string[];
+function newAspect(name: string, index: number): Aspect {
+  const angle = -Math.PI / 2 + index * ((2 * Math.PI) / 6) + (index >= 6 ? 0.5 : 0);
+  const label = clampPt({ x: 500 + Math.cos(angle) * 300, y: 330 + Math.sin(angle) * 220 });
+  const { a, b } = defaultAxis(label);
+  return { id: uid(), name, label, a, b, aLabel: "", bLabel: "", seated: true, ideal: 0.5, room: 0.15 };
+}
 
-  const parts: string[] = [];
-  for (const line of t.split("\n")) {
-    for (const semi of line.split(";")) {
-      for (const chunk of semi.split(",")) {
-        const s = chunk.trim();
-        if (s) parts.push(s);
-      }
+function fitOf(opt: Option, seated: Aspect[]): Fit {
+  if (!seated.length) return { status: "unplaced", misses: [] };
+  const misses: Aspect[] = [];
+  let near = true;
+  for (const a of seated) {
+    const v = opt.values[a.id];
+    if (v === undefined) return { status: "unplaced", misses: [] };
+    const gap = Math.abs(v - a.ideal) - a.room;
+    if (gap > 1e-6) {
+      misses.push(a);
+      if (gap > 0.1) near = false;
     }
   }
-
-  // de-dupe case-insensitively
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const p of parts) {
-    const k = p.toLowerCase();
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push(p);
-  }
-  return out;
+  if (!misses.length) return { status: "inside", misses };
+  return { status: near ? "edge" : "outside", misses };
 }
 
-function inferAxis(text: string) {
-  const s = (text || "").trim();
-  const lower = s.toLowerCase();
-
-  const vs = lower.indexOf(" vs ");
-  if (vs > 0) {
-    const a = s.slice(0, vs).trim();
-    const b = s.slice(vs + 4).trim();
-    if (a && b) return { name: `${a} ↔ ${b}`, left: a, right: b };
-  }
-
-  const slash = s.indexOf("/");
-  if (slash > 0) {
-    const a = s.slice(0, slash).trim();
-    const b = s.slice(slash + 1).trim();
-    if (a && b) return { name: `${a} ↔ ${b}`, left: a, right: b };
-  }
-
-  // very light keyword mapping
-  if (lower.includes("money") || lower.includes("salary") || lower.includes("pay")) return { name: "Money", left: "Lower", right: "Higher" };
-  if (lower.includes("time") || lower.includes("balance") || lower.includes("burnout") || lower.includes("life"))
-    return { name: "Work-life", left: "All work", right: "All life" };
-  if (lower.includes("growth") || lower.includes("learning") || lower.includes("skills")) return { name: "Growth", left: "Stable", right: "Expansive" };
-  if (lower.includes("meaning") || lower.includes("purpose") || lower.includes("impact")) return { name: "Meaning", left: "Instrumental", right: "Purposeful" };
-  if (lower.includes("risk") || lower.includes("security") || lower.includes("stability")) return { name: "Risk", left: "Safer", right: "Riskier" };
-
-  return { name: s || "Dimension", left: "Lower", right: "Higher" };
+function fitSentence(f: Fit, seatedCount: number) {
+  const names = f.misses.map((a) => a.name).join(", ");
+  if (f.status === "unplaced") return "Not placed on every seat yet";
+  if (f.status === "inside") return seatedCount === 1 ? "Inside the balance on its seat" : `Inside the balance on all ${seatedCount} seats`;
+  if (f.status === "edge") return `At the edge on ${names}`;
+  return `Outside on ${names}`;
 }
 
-function buildDimensionsFromConsiderations(raw: string, max = 8) {
-  const parts = splitCandidates(raw).slice(0, max);
-  if (!parts.length) return null as null | Array<Dim>;
-
-  const dims: Dim[] = parts.map((p) => {
-    const a = inferAxis(p);
-    return { id: uid(), name: a.name, leftLabel: a.left, rightLabel: a.right, preference: 0.5 };
+function relocationExample(): MapState {
+  const mk = (p: Partial<Aspect> & Pick<Aspect, "name" | "label" | "a" | "b" | "aLabel" | "bLabel" | "ideal">): Aspect => ({
+    id: uid(),
+    seated: true,
+    room: 0.2,
+    ...p,
   });
-
-  // Ensure 2D map works.
-  while (dims.length < 2) {
-    dims.push({ id: uid(), name: `Dimension ${dims.length + 1}`, leftLabel: "Lower", rightLabel: "Higher", preference: 0.5 });
-  }
-
-  return dims;
-}
-
-// -------------------- types + defaults --------------------
-type Dim = { id: string; name: string; leftLabel: string; rightLabel: string; preference: number };
-type Opt = { id: string; name: string; notes: string; scores: Record<string, number> };
-
-const DEFAULT_DIMS: Dim[] = [
-  { id: uid(), name: "Work-life", leftLabel: "All work", rightLabel: "All life", preference: 0.65 },
-  { id: uid(), name: "Money", leftLabel: "Lower", rightLabel: "Higher", preference: 0.7 },
-  { id: uid(), name: "Growth", leftLabel: "Stable", rightLabel: "Expansive", preference: 0.6 },
-  { id: uid(), name: "Meaning", leftLabel: "Instrumental", rightLabel: "Purposeful", preference: 0.7 },
-];
-
-const DEFAULT_OPTIONS: Opt[] = [
-  { id: uid(), name: "", notes: "", scores: {} },
-  { id: uid(), name: "", notes: "", scores: {} },
-  { id: uid(), name: "", notes: "", scores: {} },
-];
-
-function initOptions(dims: Dim[]) {
-  // Start unnamed options away from the preference point in dims[0]/dims[1].
-  const p0 = dims[0]?.preference ?? 0.5;
-  const p1 = dims[1]?.preference ?? 0.5;
-  const outside0 = p0 < 0.5 ? 0.9 : 0.1;
-  const outside1 = p1 < 0.5 ? 0.9 : 0.1;
-
-  return DEFAULT_OPTIONS.map((o) => ({
-    ...o,
-    scores: Object.fromEntries(dims.map((d, idx) => [d.id, idx === 0 ? outside0 : idx === 1 ? outside1 : 0.5])),
-  }));
-}
-
-// -------------------- tiny dev tests --------------------
-function runTests() {
-  const assert = (c: boolean, m: string) => {
-    if (!c) throw new Error(m);
+  const place = mk({ name: "Place of living", label: { x: 399, y: 79 }, a: { x: 396, y: 140 }, b: { x: 396, y: 600 }, aLabel: "High preference", bLabel: "Low preference", ideal: 0.8 });
+  const salary = mk({ name: "Salary", label: { x: 852, y: 216 }, a: { x: 197, y: 235 }, b: { x: 767, y: 235 }, aLabel: "Median and growing", bLabel: "High, short term", ideal: 0.29 });
+  const life = mk({ name: "Work-life balance", label: { x: 143, y: 375 }, a: { x: 242, y: 396 }, b: { x: 812, y: 396 }, aLabel: "All work", bLabel: "All life", ideal: 0.65 });
+  const growth = mk({ name: "Growth options", label: { x: 650, y: 660 }, a: { x: 700, y: 140 }, b: { x: 700, y: 600 }, aLabel: "Visible", bLabel: "Hidden", ideal: 0.27 });
+  const v = (pl: number, sa: number, li: number, gr: number) => ({ [place.id]: pl, [salary.id]: sa, [life.id]: li, [growth.id]: gr });
+  return {
+    title: "Relocate for a new job?",
+    aspects: [place, salary, life, growth],
+    options: [
+      { id: uid(), name: "Stay and renegotiate", values: v(0.7, 0.3, 0.55, 0.4), reasoning: "Home stays home. The raise is modest but keeps growing, and the next step up is already visible." },
+      { id: uid(), name: "Offer in Philadelphia", values: v(0.75, 0.45, 0.72, 0.3), reasoning: "Close enough to keep my people. Better hours. Growth is clear on paper, less so in practice." },
+      { id: uid(), name: "Startup in San Francisco", values: v(0.15, 0.9, 0.12, 0.85), reasoning: "Big number up front, but it asks for all of my time, and where it leads is hidden." },
+    ],
   };
-
-  assert(splitCandidates("• a\n• b").length === 2, "splitCandidates bullets");
-  assert(inferAxis("x vs y").left === "x" && inferAxis("x vs y").right === "y", "inferAxis vs");
-  assert(inferAxis("remote / in-person").left === "remote" && inferAxis("remote / in-person").right === "in-person", "inferAxis slash");
-  assert(normalizeText("a\r\nb") === "a\nb", "normalizeText CR");
-
-  const dims = buildDimensionsFromConsiderations("money")!;
-  assert(dims.length >= 2, "buildDimensions ensures at least 2");
-
-  const os = initOptions([
-    { id: "a", name: "A", leftLabel: "L", rightLabel: "R", preference: 0.8 },
-    { id: "b", name: "B", leftLabel: "L", rightLabel: "R", preference: 0.2 },
-  ] as any);
-  assert(os[0].scores.a === 0.1 && os[0].scores.b === 0.9, "initOptions places outside preference");
 }
 
-try {
-  // eslint-disable-next-line no-undef
-  if (typeof process === "undefined" || process.env?.NODE_ENV !== "production") runTests();
-} catch {
-  // Don’t break runtime for dev-only tests.
-}
+const emptyStore = (): Store => ({ title: "", aspects: [], options: [], step: 1, snapshots: [] });
+const cloneState = (s: MapState): MapState => JSON.parse(JSON.stringify({ title: s.title, aspects: s.aspects, options: s.options }));
 
-// -------------------- component --------------------
+// ---------------------------------------------------------------- component
 export default function SeatsAtTheTableDecisionMapper() {
-  const [step, setStep] = useState<"intake" | "visual">("intake");
-  const [decisionTitle, setDecisionTitle] = useState("My decision");
-  const [considerations, setConsiderations] = useState("");
+  const [store, setStore] = useState<Store>(emptyStore);
+  const [loaded, setLoaded] = useState(false);
+  const [today, setToday] = useState("");
+  const [selectedOpt, setSelectedOpt] = useState<string | null>(null);
+  const [focusAspect, setFocusAspect] = useState<string | null>(null);
+  const [ghostId, setGhostId] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [moveKind, setMoveKind] = useState<MoveKind>("perspective");
+  const [moveNote, setMoveNote] = useState("");
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const dragRef = useRef<Drag>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
-  const [dims, setDims] = useState<Dim[]>(DEFAULT_DIMS);
-  const [options, setOptions] = useState<Opt[]>(() => initOptions(DEFAULT_DIMS));
-  const [poly, setPoly] = useState(() => makeDefaultPoly());
-  const [selectedOptionId, setSelectedOptionId] = useState<string>(DEFAULT_OPTIONS[0]?.id);
-
-  // SVG layout
-  const size = 420;
-  const pad = 26;
-  const inner = size - pad * 2;
-  const toSvg = (p: { x: number; y: number }) => ({ x: pad + p.x * inner, y: pad + (1 - p.y) * inner });
-  const fromSvg = (p: { x: number; y: number }) => ({ x: clamp01((p.x - pad) / inner), y: clamp01(1 - (p.y - pad) / inner) });
-
-  const polySvg = poly.map(toSvg);
-  const polyPath = polySvg.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ") + " Z";
-
-  // option scoring: distance-to-preference + polygon inclusion (2D)
-  const statusById = useMemo(() => {
-    const pref = Object.fromEntries(dims.map((d) => [d.id, d.preference]));
-    const out: Record<string, { dist: number; inside: boolean; score: number }> = {};
-
-    for (const o of options) {
-      const coords = dims.map((d) => o.scores[d.id] ?? 0.5);
-      const prefs = dims.map((d) => pref[d.id] ?? 0.5);
-
-      let sum = 0;
-      for (let i = 0; i < coords.length; i++) {
-        const diff = coords[i] - prefs[i];
-        sum += diff * diff;
+  // load + save
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Store;
+        if (parsed && Array.isArray(parsed.aspects)) setStore({ ...emptyStore(), ...parsed });
       }
-      const dist = Math.sqrt(sum / Math.max(1, coords.length));
-
-      const x = coords[0] ?? 0.5;
-      const y = coords[1] ?? 0.5;
-      const inside = poly.length >= 3 ? pointInPolygon({ x, y }, poly) : true;
-      const score = (1 - dist) * (inside ? 1 : 0.75);
-
-      out[o.id] = { dist, inside, score };
+    } catch {
+      /* start fresh */
     }
+    const d = new Date();
+    setToday(`${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`);
+    setLoaded(true);
+  }, []);
+  useEffect(() => {
+    if (!loaded) return;
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify(store));
+    } catch {
+      /* storage full or blocked */
+    }
+  }, [store, loaded]);
 
+  const { step, aspects, options, snapshots, title } = store;
+  const set = useCallback((fn: (s: Store) => Store) => setStore((s) => fn(s)), []);
+  const patchAspect = (id: string, p: Partial<Aspect>) => set((s) => ({ ...s, aspects: s.aspects.map((a) => (a.id === id ? { ...a, ...p } : a)) }));
+  const patchOption = (id: string, p: Partial<Option>) => set((s) => ({ ...s, options: s.options.map((o) => (o.id === id ? { ...o, ...p } : o)) }));
+  const goto = (n: number) => set((s) => ({ ...s, step: clamp(n, 1, 6) }));
+
+  const seated = useMemo(() => aspects.filter((a) => a.seated && a.name.trim()), [aspects]);
+  const ordered = useMemo(() => orderForRegion(seated), [seated]);
+  const regionPts = ordered.map((a) => lerp(a.a, a.b, a.ideal));
+  const fits = useMemo(() => Object.fromEntries(options.map((o) => [o.id, fitOf(o, seated)])) as Record<string, Fit>, [options, seated]);
+  const ghost = snapshots.find((s) => s.id === ghostId) || null;
+  const ghostPts = useMemo(() => {
+    if (!ghost) return [] as Pt[];
+    const gs = ghost.state.aspects.filter((a) => a.seated && a.name.trim());
+    return orderForRegion(gs).map((a) => lerp(a.a, a.b, a.ideal));
+  }, [ghost]);
+
+  // Where each option sits on the page. The region's centre is a perfect fit; the edge of the
+  // region is the limit of your give on the seat that strains most. Further out means further off.
+  const placements = useMemo(() => {
+    if (!seated.length) return [] as Array<{ o: Option; p: Pt }>;
+    const ideals = seated.map((a) => lerp(a.a, a.b, a.ideal));
+    const c = { x: ideals.reduce((s, q) => s + q.x, 0) / ideals.length, y: ideals.reduce((s, q) => s + q.y, 0) / ideals.length };
+    const out: Array<{ o: Option; p: Pt }> = [];
+    for (const o of options) {
+      let worst = 0;
+      let wi = 0;
+      seated.forEach((a, i) => {
+        const r = Math.abs((o.values[a.id] ?? 0.5) - a.ideal) / Math.max(a.room, 0.03);
+        if (r > worst) {
+          worst = r;
+          wi = i;
+        }
+      });
+      const a = seated[wi];
+      let dx = ideals[wi].x - c.x;
+      let dy = ideals[wi].y - c.y;
+      let R = Math.hypot(dx, dy);
+      if (R < 20) {
+        const sign = (o.values[a.id] ?? 0.5) >= a.ideal ? 1 : -1;
+        const vx = a.b.x - a.a.x;
+        const vy = a.b.y - a.a.y;
+        const len = Math.hypot(vx, vy) || 1;
+        dx = (vx / len) * sign;
+        dy = (vy / len) * sign;
+        R = 80;
+      } else {
+        dx /= R;
+        dy /= R;
+      }
+      const dist = R * Math.min(worst, 3.2) * 0.65;
+      const fitIn = (q: Pt): Pt => ({ x: clamp(q.x, 110, W - 110), y: clamp(q.y, 90, H - 56) });
+      let p = fitIn({ x: c.x + dx * dist, y: c.y + dy * dist + 5 });
+      // keep labels from sitting on top of each other
+      for (let k = 0; k < 6 && out.some((q) => Math.abs(q.p.x - p.x) < 140 && Math.abs(q.p.y - p.y) < 20); k++) p = fitIn({ x: p.x, y: p.y + 22 });
+      out.push({ o, p });
+    }
     return out;
-  }, [dims, options, poly]);
+  }, [options, seated]);
 
-  const points2D = useMemo(() => {
-    const xId = dims[0]?.id;
-    const yId = dims[1]?.id;
-    return options.map((o) => {
-      const isNamed = !!o.name.trim();
-      return {
-        id: o.id,
-        displayName: isNamed ? o.name : "New option",
-        isNamed,
-        x: o.scores[xId] ?? 0.5,
-        y: o.scores[yId] ?? 0.5,
-      };
-    });
-  }, [dims, options]);
+  const showAxes = step >= 3;
+  const showRegion = step >= 4;
+  const showOptions = step >= 5;
 
-  const pref2D = useMemo(() => ({ x: dims[0]?.preference ?? 0.5, y: dims[1]?.preference ?? 0.5 }), [dims]);
-
-  // dragging state
-  const [dragPolyIdx, setDragPolyIdx] = useState<number | null>(null);
-  const [dragOptionId, setDragOptionId] = useState<string | null>(null);
-  const dragModeRef = useRef<"none" | "poly" | "option">("none");
-
-  const selected = options.find((o) => o.id === selectedOptionId) || options[0];
-
-  const startFromIntake = () => {
-    const built = buildDimensionsFromConsiderations(considerations);
-    const nextDims = built || DEFAULT_DIMS;
-    setDims(nextDims);
-    setOptions(initOptions(nextDims));
-    setPoly(makeDefaultPoly());
-    setSelectedOptionId(DEFAULT_OPTIONS[0]?.id);
-    setStep("visual");
+  // ------------------------------------------------ pointer handling
+  const toSheet = (e: React.PointerEvent): Pt => {
+    const svg = svgRef.current;
+    if (!svg) return { x: 0, y: 0 };
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const m = svg.getScreenCTM();
+    if (!m) return { x: 0, y: 0 };
+    const r = pt.matrixTransform(m.inverse());
+    return { x: r.x, y: r.y };
+  };
+  const begin = (e: React.PointerEvent, d: NonNullable<Drag>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    svgRef.current?.setPointerCapture(e.pointerId);
+    dragRef.current = d;
+  };
+  const onMove = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const p = toSheet(e);
+    if (d.kind === "label") {
+      const dx = clamp(p.x - d.from.x, 24 - Math.min(d.start.label.x, d.start.a.x, d.start.b.x), W - 24 - Math.max(d.start.label.x, d.start.a.x, d.start.b.x));
+      const dy = clamp(p.y - d.from.y, 24 - Math.min(d.start.label.y, d.start.a.y, d.start.b.y), H - 24 - Math.max(d.start.label.y, d.start.a.y, d.start.b.y));
+      const sh = (q: Pt) => ({ x: q.x + dx, y: q.y + dy });
+      patchAspect(d.id, { label: sh(d.start.label), a: sh(d.start.a), b: sh(d.start.b) });
+    } else if (d.kind === "end") {
+      const asp = aspects.find((a) => a.id === d.id);
+      if (!asp) return;
+      const other = d.which === "a" ? asp.b : asp.a;
+      const q = clampPt(p);
+      if (Math.hypot(q.x - other.x, q.y - other.y) < 60) return;
+      patchAspect(d.id, { [d.which]: q } as Partial<Aspect>);
+    } else if (d.kind === "ideal") {
+      const asp = aspects.find((a) => a.id === d.id);
+      if (asp) patchAspect(d.id, { ideal: project(p, asp.a, asp.b) });
+    } else if (d.kind === "value") {
+      const asp = aspects.find((a) => a.id === d.id);
+      const opt = options.find((o) => o.id === d.optId);
+      if (asp && opt) patchOption(opt.id, { values: { ...opt.values, [asp.id]: project(p, asp.a, asp.b) } });
+    }
+  };
+  const end = () => {
+    dragRef.current = null;
+  };
+  const nudge = (e: React.KeyboardEvent, apply: (dx: number, dy: number) => void) => {
+    const big = e.shiftKey ? 5 : 1;
+    const k = e.key;
+    if (k === "ArrowLeft") apply(-big, 0);
+    else if (k === "ArrowRight") apply(big, 0);
+    else if (k === "ArrowUp") apply(0, -big);
+    else if (k === "ArrowDown") apply(0, big);
+    else return;
+    e.preventDefault();
+  };
+  const alongStep = (a: Aspect, dx: number, dy: number) => {
+    // translate an arrow-key press into movement along the axis direction
+    const vx = a.b.x - a.a.x;
+    const vy = a.b.y - a.a.y;
+    const len = Math.hypot(vx, vy) || 1;
+    return ((dx * vx + dy * vy) / len) * 0.02;
   };
 
+  // ------------------------------------------------ actions
+  const addAspect = () => {
+    const name = draft.trim();
+    if (!name) return;
+    set((s) => ({ ...s, aspects: [...s.aspects, newAspect(name, s.aspects.length)] }));
+    setDraft("");
+  };
+  const removeAspect = (id: string) =>
+    set((s) => ({
+      ...s,
+      aspects: s.aspects.filter((a) => a.id !== id),
+      options: s.options.map((o) => {
+        const values = { ...o.values };
+        delete values[id];
+        return { ...o, values };
+      }),
+    }));
+  const orient = (a: Aspect, dir: "h" | "v" | "flip") => {
+    if (dir === "flip") return patchAspect(a.id, { a: a.b, b: a.a });
+    const mid = lerp(a.a, a.b, 0.5);
+    const len = clamp(Math.hypot(a.b.x - a.a.x, a.b.y - a.a.y), 120, dir === "h" ? W - 80 : H - 80);
+    const p1 = dir === "h" ? { x: mid.x - len / 2, y: mid.y } : { x: mid.x, y: mid.y - len / 2 };
+    const p2 = dir === "h" ? { x: mid.x + len / 2, y: mid.y } : { x: mid.x, y: mid.y + len / 2 };
+    const shift = dir === "h" ? clamp(p1.x, 40, W - 40 - len) - p1.x : clamp(p1.y, 40, H - 40 - len) - p1.y;
+    const sh = (q: Pt) => (dir === "h" ? { x: q.x + shift, y: q.y } : { x: q.x, y: q.y + shift });
+    patchAspect(a.id, { a: sh(p1), b: sh(p2) });
+  };
+  const spreadOut = () =>
+    set((s) => ({
+      ...s,
+      aspects: s.aspects.map((a, i) => {
+        const fresh = newAspect(a.name, i);
+        return { ...a, label: fresh.label, a: fresh.a, b: fresh.b };
+      }),
+    }));
   const addOption = () => {
-    // New unnamed option, placed away from preference.
-    const p0 = dims[0]?.preference ?? 0.5;
-    const p1 = dims[1]?.preference ?? 0.5;
-    const outside0 = p0 < 0.5 ? 0.9 : 0.1;
-    const outside1 = p1 < 0.5 ? 0.9 : 0.1;
-
-    const o: Opt = {
-      id: uid(),
-      name: "",
-      notes: "",
-      scores: Object.fromEntries(dims.map((d, idx) => [d.id, idx === 0 ? outside0 : idx === 1 ? outside1 : 0.5])),
-    };
-
-    setOptions((os) => [...os, o]);
-    setSelectedOptionId(o.id);
+    const o: Option = { id: uid(), name: "", values: Object.fromEntries(seated.map((a) => [a.id, 0.5])), reasoning: "" };
+    set((s) => ({ ...s, options: [...s.options, o] }));
+    setSelectedOpt(o.id);
   };
-
   const removeOption = (id: string) => {
-    const next = options.filter((o) => o.id !== id);
-    setOptions(next);
-    if (selectedOptionId === id) setSelectedOptionId(next[0]?.id);
+    set((s) => ({ ...s, options: s.options.filter((o) => o.id !== id) }));
+    if (selectedOpt === id) setSelectedOpt(null);
+  };
+  const takeSnapshot = () => {
+    const snap: Snapshot = { id: uid(), at: new Date().toISOString(), kind: moveKind, note: moveNote.trim(), state: cloneState(store) };
+    set((s) => ({ ...s, snapshots: [snap, ...s.snapshots] }));
+    setMoveNote("");
+  };
+  const restore = (snap: Snapshot) => {
+    if (!window.confirm("Restore this snapshot? The current map will be replaced. Take a snapshot first if you want to keep it.")) return;
+    set((s) => ({ ...s, ...cloneState(snap.state) }));
+    setGhostId(null);
+    setSelectedOpt(null);
+  };
+  const loadExample = () => {
+    set((s) => ({ ...s, ...relocationExample(), step: 4 }));
+    setSelectedOpt(null);
+  };
+  const startOver = () => {
+    if (!window.confirm("Start a new map? This clears the current map and its snapshots. Export it first if you want a copy.")) return;
+    setStore(emptyStore());
+    setSelectedOpt(null);
+    setGhostId(null);
+  };
+  const exportJson = () => {
+    const blob = new Blob([JSON.stringify(store, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(title || "seats-at-the-table").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const importJson = (file: File) => {
+    file.text().then((t) => {
+      try {
+        const parsed = JSON.parse(t) as Store;
+        if (!Array.isArray(parsed.aspects)) throw new Error("bad file");
+        setStore({ ...emptyStore(), ...parsed });
+        setSelectedOpt(null);
+        setGhostId(null);
+      } catch {
+        window.alert("That file isn't a Seats at the Table map. Choose a .json file exported from this tool.");
+      }
+    });
   };
 
-  const top3 = useMemo(() => {
-    return [...options]
-      .map((o) => ({ o, s: statusById[o.id] }))
-      .sort((a, b) => (b.s?.score ?? 0) - (a.s?.score ?? 0))
-      .slice(0, 3);
-  }, [options, statusById]);
+  // auto-select first option on step 5
+  useEffect(() => {
+    if (step === 5 && !selectedOpt && options.length) setSelectedOpt(options[0].id);
+  }, [step, selectedOpt, options]);
 
-  // Process overview (short)
-  const processSteps = [
-    { key: "intake", label: "1) Write your considerations freely.", desc: "Messy is fine." },
-    { key: "axes", label: "2) Name axes", desc: "Edit the polarities." },
-    { key: "region", label: "3) Draw passable region", desc: "Drag polygon points." },
-    { key: "place", label: "4) Place options", desc: "Sliders; drag once named." },
-    { key: "reflect", label: "5) Reflect", desc: "See what rises." },
-  ];
+  // ------------------------------------------------ sheet rendering helpers
+  const poleLabel = (end: Pt, other: Pt, text: string, key: string) => {
+    if (!text) return null;
+    const dx = end.x - other.x;
+    const dy = end.y - other.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const anchor = ux > 0.5 ? "start" : ux < -0.5 ? "end" : "middle";
+    const x = end.x + ux * 10;
+    const y = end.y + uy * 14 + (uy > 0.5 ? 6 : uy < -0.5 ? -2 : 4);
+    return (
+      <text key={key} x={x} y={y} textAnchor={anchor} className="pole">
+        {text}
+      </text>
+    );
+  };
 
+  const selected = options.find((o) => o.id === selectedOpt) || null;
+  const stepInfo = STEPS[step - 1];
+
+  // ------------------------------------------------ render
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
-          <div>
-            <div className="text-sm text-muted-foreground">Seats at the Table</div>
-            <div className="text-3xl font-semibold tracking-tight">Decision Journey Mapper</div>
-          </div>
-          {step === "visual" ? (
-            <Button variant="secondary" onClick={() => setStep("intake")}>
-              New intake
-            </Button>
-          ) : null}
+    <div className="mat">
+      <header className="top">
+        <div className="brand">
+          <span className="brand-title">Seats at the Table</span>
+          <span className="brand-sub">Decision journey mapping</span>
         </div>
-        <div>
-          <Label>Decision</Label>
-          <Input value={decisionTitle} onChange={(e) => setDecisionTitle(e.target.value)} placeholder="e.g., Take the new job?" />
-        </div>
+        <span className="byline">Nitzan Hermon</span>
+      </header>
+
+      <div className="decision">
+        <label htmlFor="decision-title" className="sr-only">
+          What are you deciding?
+        </label>
+        <input
+          id="decision-title"
+          className="decision-input"
+          value={title}
+          onChange={(e) => set((s) => ({ ...s, title: e.target.value }))}
+          placeholder="What are you deciding?"
+        />
       </div>
 
-      {/* Process overview */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">How it works</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-            {processSteps.map((s) => (
-              <div
-                key={s.key}
-                className={cn("rounded-2xl border p-3", (step === "intake" ? s.key === "intake" : s.key === "place") && "border-primary bg-primary/5")}
-              >
-                <div className="font-medium text-sm">{s.label}</div>
-                <div className="text-xs text-muted-foreground mt-1">{s.desc}</div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      <nav className="steps" aria-label="Steps">
+        {STEPS.map((s) => (
+          <button key={s.n} className={cn("step", s.n === step && "is-current", s.n < step && "is-done")} onClick={() => goto(s.n)} aria-current={s.n === step ? "step" : undefined}>
+            <span className="step-n">{s.n}</span>
+            <span className="step-name">{s.name}</span>
+          </button>
+        ))}
+      </nav>
 
-      {step === "intake" ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Start with words</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="text-sm text-muted-foreground">
-              Write your considerations in plain language. Bullets, fragments, contradictions — all good. If you write “X vs Y” or “X / Y”, we’ll auto-build an axis.
-            </div>
+      <main className="work">
+        {/* ------------------------------------------------ the page */}
+        <section className="sheet-wrap" aria-label="Map">
+          <div className="sheet-scroll">
+          <svg
+            ref={svgRef}
+            className="sheet"
+            viewBox={`0 0 ${W} ${H}`}
+            role="img"
+            aria-label={`Map of ${title || "your decision"}`}
+            onPointerMove={onMove}
+            onPointerUp={end}
+            onPointerCancel={end}
+          >
+            <rect x={0} y={0} width={W} height={H} className="paper" />
 
-            <div className="space-y-2">
-              <Label>Write your considerations freely.</Label>
-              <Textarea
-                value={considerations}
-                onChange={(e) => setConsiderations(e.target.value)}
-                placeholder={[
-                  "Examples:",
-                  "• money vs time",
-                  "• location / commute",
-                  "• growth options",
-                  "• identity / meaning",
-                  "• risk, runway, security",
-                  "• my relationships + community",
-                ].join("\n")}
-                className="min-h-[180px]"
+            {/* chip */}
+            <g transform="translate(28 28)">
+              <rect width={stepInfo.chip.length * 10.6 + 30} height={38} rx={8} className="chip" />
+              <text x={14} y={25} className="chip-text">
+                {stepInfo.chip}
+              </text>
+            </g>
+
+            {!aspects.length && (
+              <text x={W / 2} y={H / 2} textAnchor="middle" className="empty">
+                Your aspects will appear here as you list them.
+              </text>
+            )}
+
+            {/* axes */}
+            {showAxes &&
+              aspects.map((a) => (
+                <line key={`l-${a.id}`} x1={a.a.x} y1={a.a.y} x2={a.b.x} y2={a.b.y} className={cn("axis", !a.seated && "is-unseated")} />
+              ))}
+
+            {/* desired region */}
+            {showRegion && regionPts.length >= 3 && <polygon points={regionPts.map((p) => `${p.x},${p.y}`).join(" ")} className="region" />}
+            {showRegion && regionPts.length === 2 && <line x1={regionPts[0].x} y1={regionPts[0].y} x2={regionPts[1].x} y2={regionPts[1].y} className="region-line" />}
+            {ghost && ghostPts.length >= 3 && <polygon points={ghostPts.map((p) => `${p.x},${p.y}`).join(" ")} className="ghost" />}
+
+            {/* room on each axis */}
+            {showRegion &&
+              seated.map((a) => {
+                const p1 = lerp(a.a, a.b, clamp(a.ideal - a.room, 0, 1));
+                const p2 = lerp(a.a, a.b, clamp(a.ideal + a.room, 0, 1));
+                return <line key={`r-${a.id}`} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} className="room" />;
+              })}
+
+            {/* selected option footprint */}
+            {showOptions && selected && seated.length >= 3 && (
+              <polygon
+                points={ordered.map((a) => lerp(a.a, a.b, selected.values[a.id] ?? 0.5)).map((p) => `${p.x},${p.y}`).join(" ")}
+                className="footprint"
               />
-              <div className="text-xs text-muted-foreground">We’ll infer up to 8 dimensions. You can edit later.</div>
-            </div>
+            )}
 
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-xs text-muted-foreground">Tip: write “X vs Y” to define an axis.</div>
-              <Button onClick={startFromIntake} className="gap-2">
-                Continue <ArrowRight className="w-4 h-4" />
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Map */}
-          <Card className="lg:col-span-2">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Map</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col md:flex-row gap-6">
-                <div className="shrink-0">
-                  <svg
-                    width={size}
-                    height={size}
-                    className="rounded-2xl border bg-background"
-                    onMouseMove={(e) => {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      const np = fromSvg({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+            {/* pole labels + names */}
+            {aspects.map((a) => (
+              <g key={`n-${a.id}`} className={cn(!a.seated && showAxes && "is-unseated")}>
+                {showAxes && poleLabel(a.a, a.b, a.aLabel, "pa")}
+                {showAxes && poleLabel(a.b, a.a, a.bLabel, "pb")}
+                <text
+                  x={a.label.x}
+                  y={a.label.y}
+                  textAnchor="middle"
+                  className={cn("aspect-name", focusAspect === a.id && "is-focus")}
+                  tabIndex={0}
+                  role="button"
+                  aria-label={`${a.name}. Drag or use arrow keys to move.`}
+                  onPointerDown={(e) => begin(e, { kind: "label", id: a.id, from: toSheet(e), start: a })}
+                  onKeyDown={(e) =>
+                    nudge(e, (dx, dy) =>
+                      patchAspect(a.id, {
+                        label: { x: a.label.x + dx * 4, y: a.label.y + dy * 4 },
+                        a: { x: a.a.x + dx * 4, y: a.a.y + dy * 4 },
+                        b: { x: a.b.x + dx * 4, y: a.b.y + dy * 4 },
+                      })
+                    )
+                  }
+                  onFocus={() => setFocusAspect(a.id)}
+                  onBlur={() => setFocusAspect(null)}
+                >
+                  {a.name || "Untitled"}
+                </text>
+              </g>
+            ))}
 
-                      if (dragModeRef.current === "poly" && dragPolyIdx !== null) {
-                        setPoly((ps) => ps.map((pt, i) => (i === dragPolyIdx ? np : pt)));
-                        return;
-                      }
+            {/* axis end handles */}
+            {step === 3 &&
+              aspects.flatMap((a) =>
+                (["a", "b"] as const).map((w) => (
+                  <g key={`e-${a.id}-${w}`}>
+                    <circle cx={a[w].x} cy={a[w].y} r={16} className="hit" onPointerDown={(e) => begin(e, { kind: "end", id: a.id, which: w })} />
+                    <circle cx={a[w].x} cy={a[w].y} r={5} className="end-handle" pointerEvents="none" />
+                  </g>
+                ))
+              )}
 
-                      if (dragModeRef.current === "option" && dragOptionId) {
-                        const xId = dims[0]?.id;
-                        const yId = dims[1]?.id;
-                        if (!xId || !yId) return;
-                        setOptions((os) =>
-                          os.map((o) => (o.id === dragOptionId ? { ...o, scores: { ...o.scores, [xId]: np.x, [yId]: np.y } } : o))
-                        );
-                      }
-                    }}
-                    onMouseUp={() => {
-                      dragModeRef.current = "none";
-                      setDragPolyIdx(null);
-                      setDragOptionId(null);
-                    }}
-                    onMouseLeave={() => {
-                      dragModeRef.current = "none";
-                      setDragPolyIdx(null);
-                      setDragOptionId(null);
-                    }}
-                  >
-                    {/* midlines */}
-                    <line x1={pad} y1={pad + inner / 2} x2={pad + inner} y2={pad + inner / 2} strokeDasharray="3 4" className="stroke-muted-foreground/40" />
-                    <line x1={pad + inner / 2} y1={pad} x2={pad + inner / 2} y2={pad + inner} strokeDasharray="3 4" className="stroke-muted-foreground/40" />
-
-                    {/* passable region */}
-                    <path d={polyPath} className="fill-primary/15 stroke-primary/50" strokeWidth={2} />
-
-                    {/* preference dot */}
-                    {(() => {
-                      const sp = toSvg(pref2D);
-                      return <circle cx={sp.x} cy={sp.y} r={6} className="fill-foreground" />;
-                    })()}
-
-                    {/* options */}
-                    {points2D.map((p) => {
-                      const s = statusById[p.id];
-                      const sp = toSvg(p);
-                      const isSelected = p.id === selectedOptionId;
-
-                      // Avoid nested ternaries in JSX to prevent syntax mistakes.
-                      const fillClass = !p.isNamed
-                        ? "fill-muted-foreground"
-                        : isSelected
-                          ? "fill-primary"
-                          : s?.inside
-                            ? "fill-foreground"
-                            : "fill-muted-foreground";
-
-                      return (
-                        <g key={p.id}>
-                          <circle
-                            cx={sp.x}
-                            cy={sp.y}
-                            r={isSelected ? 8 : 6}
-                            className={`${fillClass} ${p.isNamed ? "cursor-grab" : "cursor-not-allowed"}`}
-                            opacity={isSelected ? 1 : p.isNamed ? 0.9 : 0.35}
-                            onMouseDown={(ev) => {
-                              // Always allow selecting.
-                              ev.preventDefault();
-                              setSelectedOptionId(p.id);
-
-                              // Unnamed options are NOT draggable.
-                              if (!p.isNamed) return;
-
-                              setDragOptionId(p.id);
-                              dragModeRef.current = "option";
-                            }}
-                          />
-                          <text x={sp.x + 10} y={sp.y + 4} className="fill-muted-foreground" fontSize={12}>
-                            {p.displayName}
-                          </text>
-                        </g>
-                      );
-                    })}
-
-                    {/* polygon handles */}
-                    {polySvg.map((p, i) => (
+            {/* ideal points */}
+            {showRegion &&
+              seated.map((a) => {
+                const p = lerp(a.a, a.b, a.ideal);
+                const interactive = step === 4;
+                return (
+                  <g key={`i-${a.id}`}>
+                    {interactive && (
                       <circle
-                        key={i}
                         cx={p.x}
                         cy={p.y}
-                        r={7}
-                        className="fill-background stroke-primary cursor-grab"
-                        strokeWidth={2}
-                        onMouseDown={(ev) => {
-                          ev.preventDefault();
-                          setDragPolyIdx(i);
-                          dragModeRef.current = "poly";
-                        }}
+                        r={18}
+                        className="hit"
+                        tabIndex={0}
+                        role="slider"
+                        aria-label={`Balance on ${a.name}`}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={Math.round(a.ideal * 100)}
+                        onPointerDown={(e) => begin(e, { kind: "ideal", id: a.id })}
+                        onKeyDown={(e) => nudge(e, (dx, dy) => patchAspect(a.id, { ideal: clamp(a.ideal + alongStep(a, dx, dy), 0, 1) }))}
                       />
-                    ))}
+                    )}
+                    <circle cx={p.x} cy={p.y} r={8} className="ideal" pointerEvents="none" />
+                  </g>
+                );
+              })}
 
-                    {/* axis labels */}
-                    <text x={pad} y={pad - 8} className="fill-muted-foreground" fontSize={12}>
-                      {dims[1]?.name || "Y"}
-                    </text>
-                    <text x={pad + inner - 8} y={pad + inner + 18} textAnchor="end" className="fill-muted-foreground" fontSize={12}>
-                      {dims[0]?.name || "X"}
-                    </text>
-                  </svg>
+            {/* option value handles for the selected option */}
+            {step === 5 &&
+              selected &&
+              seated.map((a) => {
+                const v = selected.values[a.id] ?? 0.5;
+                const p = lerp(a.a, a.b, v);
+                return (
+                  <g key={`v-${a.id}`}>
+                    <circle
+                      cx={p.x}
+                      cy={p.y}
+                      r={16}
+                      className="hit"
+                      tabIndex={0}
+                      role="slider"
+                      aria-label={`${selected.name || "Option"} on ${a.name}`}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={Math.round(v * 100)}
+                      onPointerDown={(e) => begin(e, { kind: "value", id: a.id, optId: selected.id })}
+                      onKeyDown={(e) =>
+                        nudge(e, (dx, dy) => patchOption(selected.id, { values: { ...selected.values, [a.id]: clamp(v + alongStep(a, dx, dy), 0, 1) } }))
+                      }
+                    />
+                    <rect x={p.x - 6} y={p.y - 6} width={12} height={12} className="value-handle" pointerEvents="none" />
+                  </g>
+                );
+              })}
 
-                  <div className="mt-3 text-xs text-muted-foreground">
-                    Drag polygon points to define “passable.” Name an option to enable dragging its dot.
-                  </div>
+            {/* options as "@ Name": nearer the centre the better they fit, leaning toward the seat that strains most */}
+            {showOptions &&
+              placements.map(({ o, p }) => {
+                const onRed = regionPts.length >= 3 && pointInPolygon(p, regionPts);
+                const f = fits[o.id];
+                return (
+                  <text
+                    key={`o-${o.id}`}
+                    x={p.x}
+                    y={p.y}
+                    textAnchor="middle"
+                    className={cn("opt", onRed && "on-red", f?.status === "outside" && "is-out", o.id === selectedOpt && "is-selected")}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      setSelectedOpt(o.id);
+                      if (step !== 5) goto(5);
+                    }}
+                  >
+                    @ {o.name || "Unnamed option"}
+                  </text>
+                );
+              })}
+
+            {/* slide chrome */}
+            <text x={W - 28} y={H - 22} textAnchor="end" className="chrome">
+              in-process.net
+            </text>
+            <text x={28} y={H - 22} className="chrome">
+              {today}
+            </text>
+          </svg>
+          </div>
+
+          <div className="sheet-tools">
+            <button className="link" onClick={exportJson}>
+              Export map
+            </button>
+            <button className="link" onClick={() => fileRef.current?.click()}>
+              Import map
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/json,.json"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) importJson(f);
+                e.target.value = "";
+              }}
+            />
+            <button className="link" onClick={() => window.print()}>
+              Print
+            </button>
+            <button className="link" onClick={startOver}>
+              Start a new map
+            </button>
+          </div>
+        </section>
+
+        {/* ------------------------------------------------ the prompt */}
+        <aside className="panel" aria-live="polite">
+          <h2 className="panel-title">{stepInfo.name}</h2>
+
+          {step === 1 && (
+            <>
+              <p className="prompt">What are the dimensions of your decision? What factors into it, and what would be affected? What are the places where this will live?</p>
+              <form
+                className="row"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  addAspect();
+                }}
+              >
+                <label htmlFor="aspect-draft" className="sr-only">
+                  New aspect
+                </label>
+                <input id="aspect-draft" className="field" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Salary, commute, my partner's work…" />
+                <button className="btn" type="submit" disabled={!draft.trim()}>
+                  Add
+                </button>
+              </form>
+              {aspects.length ? (
+                <ul className="list">
+                  {aspects.map((a) => (
+                    <li key={a.id} className="list-row">
+                      <input className="field field-quiet" value={a.name} aria-label="Aspect name" onChange={(e) => patchAspect(a.id, { name: e.target.value })} />
+                      <button className="link" onClick={() => removeAspect(a.id)}>
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="empty-panel">
+                  <p>Write them as they come. Messy is fine; you will decide later which ones get a seat.</p>
+                  <button className="link" onClick={loadExample}>
+                    Or walk through the example: relocating for a new job
+                  </button>
                 </div>
+              )}
+            </>
+          )}
 
-                {/* Editors */}
-                <div className="flex-1 space-y-5">
-                  <div className="flex items-center justify-between">
-                    <div className="font-medium">Options</div>
-                    <Button variant="secondary" onClick={addOption} className="gap-2">
-                      <Plus className="w-4 h-4" /> Add
-                    </Button>
-                  </div>
+          {step === 2 && (
+            <>
+              <p className="prompt">Can you arrange them on a page as a constellation? How do they orbit each other? Are there clusters?</p>
+              <p className="hint">Drag each aspect on the page. Put the ones that pull on each other close together. Post-its on a real table work too.</p>
+              {aspects.length > 1 && (
+                <button className="link" onClick={spreadOut}>
+                  Spread them out again
+                </button>
+              )}
+            </>
+          )}
 
-                  <div className="space-y-2">
-                    {options.map((o) => {
-                      const s = statusById[o.id];
-                      const isSelected = o.id === selectedOptionId;
-                      const isNamed = !!o.name.trim();
-                      const displayName = isNamed ? o.name : "New option";
+          {step === 3 && (
+            <>
+              <p className="prompt">Open up space within each of these focal points. Draw each as a line and assign values for each side of the line.</p>
+              <p className="hint">Explore the dualities, and the scale, of each dimension. Then decide which ones make it to the table. Drag the ends of a line to tilt or stretch it.</p>
+              <ul className="list">
+                {aspects.map((a) => (
+                  <li key={a.id} className={cn("axis-card", !a.seated && "is-unseated")} onMouseEnter={() => setFocusAspect(a.id)} onMouseLeave={() => setFocusAspect(null)}>
+                    <div className="axis-head">
+                      <span className="axis-name">{a.name || "Untitled"}</span>
+                      <label className="seat">
+                        <input type="checkbox" checked={a.seated} onChange={(e) => patchAspect(a.id, { seated: e.target.checked })} />
+                        Seat at the table
+                      </label>
+                    </div>
+                    <div className="poles">
+                      <input className="field" value={a.aLabel} aria-label={`${a.name}: one end`} placeholder="One end" onChange={(e) => patchAspect(a.id, { aLabel: e.target.value })} />
+                      <input className="field" value={a.bLabel} aria-label={`${a.name}: other end`} placeholder="Other end" onChange={(e) => patchAspect(a.id, { bLabel: e.target.value })} />
+                    </div>
+                    <div className="row-links">
+                      <button className="link" onClick={() => orient(a, "h")}>
+                        Horizontal
+                      </button>
+                      <button className="link" onClick={() => orient(a, "v")}>
+                        Vertical
+                      </button>
+                      <button className="link" onClick={() => orient(a, "flip")}>
+                        Swap ends
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
 
-                      return (
-                        <div key={o.id} className={cn("rounded-2xl border p-3", isSelected && "border-primary", !isNamed && "opacity-60")}>
-                          <div className="flex items-center justify-between gap-2">
-                            <button className="text-left" onClick={() => setSelectedOptionId(o.id)}>
-                              <div className="font-medium flex items-center gap-2">
-                                {displayName}
-                                <span className="text-xs text-muted-foreground">score {(s?.score ?? 0).toFixed(2)}</span>
-                              </div>
-                              <div className="text-xs text-muted-foreground mt-1">
-                                {s?.inside ? "Inside" : "Outside"} • dist {(s?.dist ?? 0).toFixed(2)}
-                              </div>
-                            </button>
-                            <Button variant="ghost" size="icon" onClick={() => removeOption(o.id)} title="Remove">
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </div>
+          {step === 4 && (
+            <>
+              <p className="prompt">Within this constellation, is there an ideal region you would like to exist? What is the range of balance you would like to live within?</p>
+              <p className="hint">It need not be a perfect circle. It can be jagged and prioritize one aspect of the decision. Drag the red points on the page; the black stroke on each line is how much give you have.</p>
+              {seated.length < 3 && <p className="note">Seat at least three aspects to see the region as a shape.</p>}
+              <ul className="list">
+                {seated.map((a) => (
+                  <li key={a.id} className="axis-card">
+                    <div className="axis-head">
+                      <span className="axis-name">{a.name}</span>
+                    </div>
+                    <label className="range-label">
+                      <span>Ideal</span>
+                      <input type="range" min={0} max={100} value={Math.round(a.ideal * 100)} onChange={(e) => patchAspect(a.id, { ideal: Number(e.target.value) / 100 })} />
+                    </label>
+                    <div className="ends">
+                      <span>{a.aLabel || "One end"}</span>
+                      <span>{a.bLabel || "Other end"}</span>
+                    </div>
+                    <label className="range-label">
+                      <span>Give</span>
+                      <input type="range" min={0} max={50} value={Math.round(a.room * 100)} onChange={(e) => patchAspect(a.id, { room: Number(e.target.value) / 100 })} />
+                    </label>
+                    <div className="ends">
+                      <span>Non-negotiable</span>
+                      <span>Flexible</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
 
-                          {/* Selected option editor */}
-                          {isSelected ? (
-                            <div className="mt-3 space-y-3">
-                              <div>
-                                <Label>Name (enables drag)</Label>
-                                <Input
-                                  value={o.name}
-                                  onChange={(e) => setOptions((os) => os.map((x) => (x.id === o.id ? { ...x, name: e.target.value } : x)))}
-                                  placeholder="Give it a name…"
+          {step === 5 && (
+            <>
+              <p className="prompt">Plot the available options. Write your reasoning for the way you positioned them.</p>
+              <p className="hint">Select an option, then drag its squares along each line. Its outline shows where it sits on every seat. Its name sits nearer the centre the better it fits, and leans toward the seat that strains most; outside your balance, it is struck through.</p>
+              <ul className="list">
+                {options.map((o) => {
+                  const f = fits[o.id];
+                  const isSel = o.id === selectedOpt;
+                  return (
+                    <li key={o.id} className={cn("opt-card", isSel && "is-selected")}>
+                      <button className="opt-head" onClick={() => setSelectedOpt(o.id)} aria-expanded={isSel}>
+                        <span className={cn("opt-name", f?.status === "outside" && "is-out")}>{o.name || "Unnamed option"}</span>
+                        <span className={cn("fit", `fit-${f?.status}`)}>{fitSentence(f, seated.length)}</span>
+                      </button>
+                      {isSel && (
+                        <div className="opt-body">
+                          <input className="field" value={o.name} placeholder="Name this option" aria-label="Option name" onChange={(e) => patchOption(o.id, { name: e.target.value })} />
+                          {seated.map((a) => (
+                            <div key={a.id}>
+                              <label className="range-label">
+                                <span>{a.name}</span>
+                                <input
+                                  type="range"
+                                  min={0}
+                                  max={100}
+                                  value={Math.round((o.values[a.id] ?? 0.5) * 100)}
+                                  onChange={(e) => patchOption(o.id, { values: { ...o.values, [a.id]: Number(e.target.value) / 100 } })}
                                 />
-                                {!isNamed ? <div className="text-xs text-muted-foreground mt-1">Unnamed options are grey + non-draggable.</div> : null}
-                              </div>
-
-                              <div className="space-y-3">
-                                {dims.map((d) => {
-                                  const v = o.scores[d.id] ?? 0.5;
-                                  return (
-                                    <div key={d.id} className="space-y-2">
-                                      <div className="flex items-center justify-between">
-                                        <div className="text-sm font-medium">{d.name}</div>
-                                        <div className="text-xs text-muted-foreground">{Math.round(v * 100)}</div>
-                                      </div>
-                                      <Slider
-                                        value={[Math.round(v * 100)]}
-                                        onValueChange={(arr) => {
-                                          const val = ((arr as number[])?.[0] ?? 50) / 100;
-                                          setOptions((os) => os.map((x) => (x.id === o.id ? { ...x, scores: { ...x.scores, [d.id]: val } } : x)));
-                                        }}
-                                        max={100}
-                                        step={1}
-                                      />
-                                      <div className="flex items-center justify-between text-xs text-muted-foreground">
-                                        <span>{d.leftLabel}</span>
-                                        <span>{d.rightLabel}</span>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
+                              </label>
+                              <div className="ends">
+                                <span>{a.aLabel || "One end"}</span>
+                                <span>{a.bLabel || "Other end"}</span>
                               </div>
                             </div>
-                          ) : null}
+                          ))}
+                          <label className="stack">
+                            <span>Why did you place it here?</span>
+                            <textarea className="field" rows={3} value={o.reasoning} onChange={(e) => patchOption(o.id, { reasoning: e.target.value })} />
+                          </label>
+                          <button className="link" onClick={() => removeOption(o.id)}>
+                            Remove option
+                          </button>
                         </div>
-                      );
-                    })}
-                  </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              <button className="btn" onClick={addOption} disabled={!seated.length}>
+                Add an option
+              </button>
+              {!seated.length && <p className="note">Give at least one aspect a seat before placing options.</p>}
+            </>
+          )}
 
-                  {/* Preferences */}
-                  <div className="space-y-3">
-                    <div className="font-medium">Preferences</div>
-                    {dims.map((d) => (
-                      <div key={d.id} className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="text-sm font-medium">{d.name}</div>
-                          <div className="text-xs text-muted-foreground">{Math.round(d.preference * 100)}</div>
+          {step === 6 && (
+            <>
+              <p className="prompt">Do this repeatedly when the camera moves: a new perspective, opportunity, or idea.</p>
+              <p className="hint">Take a snapshot of the map as it is now, then go back and change what moved. Show an earlier snapshot to see its region traced over the current one.</p>
+              <div className="kinds" role="radiogroup" aria-label="What moved?">
+                {(Object.keys(MOVE_LABEL) as MoveKind[]).map((k) => (
+                  <button key={k} role="radio" aria-checked={moveKind === k} className={cn("kind", moveKind === k && "is-on")} onClick={() => setMoveKind(k)}>
+                    {MOVE_LABEL[k]}
+                  </button>
+                ))}
+              </div>
+              <label className="stack">
+                <span>What changed?</span>
+                <textarea className="field" rows={2} value={moveNote} onChange={(e) => setMoveNote(e.target.value)} placeholder="A second offer came in…" />
+              </label>
+              <button className="btn" onClick={takeSnapshot} disabled={!aspects.length}>
+                Take snapshot
+              </button>
+              {snapshots.length > 0 && (
+                <ul className="list snaps">
+                  {snapshots.map((s) => {
+                    const sSeated = s.state.aspects.filter((a) => a.seated && a.name.trim());
+                    const changed = options.filter((o) => {
+                      const old = s.state.options.find((x) => x.id === o.id);
+                      return old && fitOf(old, sSeated).status !== fits[o.id]?.status;
+                    });
+                    return (
+                      <li key={s.id} className="snap">
+                        <div className="snap-head">
+                          <span className="snap-kind">{MOVE_LABEL[s.kind]}</span>
+                          <span className="snap-date">{new Date(s.at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
                         </div>
-                        <Slider
-                          value={[Math.round(d.preference * 100)]}
-                          onValueChange={(arr) => {
-                            const val = ((arr as number[])?.[0] ?? 50) / 100;
-                            setDims((ds) => ds.map((x) => (x.id === d.id ? { ...x, preference: val } : x)));
-                          }}
-                          max={100}
-                          step={1}
-                        />
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span>{d.leftLabel}</span>
-                          <span>{d.rightLabel}</span>
+                        {s.note && <p className="snap-note">{s.note}</p>}
+                        {changed.length > 0 && <p className="snap-diff">Since then: {changed.map((o) => `${o.name || "Unnamed"} is now ${fits[o.id].status}`).join("; ")}.</p>}
+                        <div className="row-links">
+                          <button className="link" onClick={() => setGhostId(ghostId === s.id ? null : s.id)}>
+                            {ghostId === s.id ? "Hide on map" : "Show on map"}
+                          </button>
+                          <button className="link" onClick={() => restore(s)}>
+                            Restore
+                          </button>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </>
+          )}
 
-          {/* Right: Now what */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Now what?</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm">
-              <div className="rounded-2xl border p-3 bg-muted/30">
-                <div className="font-medium">Top candidates</div>
-                <div className="text-xs text-muted-foreground mt-1">Closer to preferences + inside passable region.</div>
-                <div className="mt-2 space-y-2">
-                  {top3.map(({ o, s }) => (
-                    <div key={o.id} className="rounded-2xl border p-3">
-                      <div className="flex items-center justify-between">
-                        <div className="font-medium">{o.name.trim() ? o.name : "New option"}</div>
-                        <div className="text-xs text-muted-foreground">{(s?.score ?? 0).toFixed(2)}</div>
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        {s?.inside ? "Inside" : "Outside"} • dist {(s?.dist ?? 0).toFixed(2)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+          <div className="pager">
+            {step > 1 ? (
+              <button className="link" onClick={() => goto(step - 1)}>
+                Back
+              </button>
+            ) : (
+              <span />
+            )}
+            {step < 6 && (
+              <button className="btn" onClick={() => goto(step + 1)} disabled={step === 1 && !aspects.length}>
+                Next: {STEPS[step].name}
+              </button>
+            )}
+          </div>
+        </aside>
+      </main>
 
-              <div className="text-xs text-muted-foreground whitespace-pre-wrap">
-                {considerations || "(no intake text)"}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Footer */}
-      <div className="pt-6 border-t text-xs text-muted-foreground flex items-center justify-between">
-        <div>Nitzan Hermon</div>
-        <a className="underline hover:no-underline" href="https://in-process.net" target="_blank" rel="noreferrer">
-          in-process.net
-        </a>
-      </div>
+      <footer className="foot">
+        <span>
+          <a href="https://in-process.net" target="_blank" rel="noreferrer">
+            In Process Coaching
+          </a>
+        </span>
+        <span>Your map is saved in this browser only.</span>
+      </footer>
     </div>
   );
 }
