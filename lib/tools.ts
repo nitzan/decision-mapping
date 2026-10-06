@@ -4,6 +4,7 @@ export type Tool = {
   about: string;
   href: string;
   external?: boolean;
+  download?: boolean;
   from?: string;
 };
 
@@ -49,6 +50,36 @@ export const FOLDERS: Folder[] = [
         href: "https://general.ai-literacy.space/",
         external: true,
         from: "Workshop №3 · Computational thinking",
+      },
+    ],
+  },
+  {
+    slug: "worksheets",
+    name: "Worksheets",
+    about: "Printable worksheets from the program. Print one, fill it in by hand, and keep it next to your work.",
+    tools: [
+      {
+        name: "Levels of Structure",
+        kind: "Worksheet · PDF",
+        about:
+          "Move from data to information to knowledge. One open field for data, then four cells each for how it is configured and the value in each configuration.",
+        href: "/worksheets/levels-of-structure.pdf",
+        download: true,
+      },
+      {
+        name: "Space Worksheet",
+        kind: "Worksheet · PDF",
+        about:
+          "Map the places where practice and communication actually happen: synchronous and asynchronous, who is there, and what happens there.",
+        href: "/worksheets/space-worksheet.pdf",
+        download: true,
+      },
+      {
+        name: "Practice Notebook",
+        kind: "Worksheet · PDF",
+        about: "A page for naming and tracking your practices: what, who with, how often, and where.",
+        href: "/worksheets/practice-notebook.pdf",
+        download: true,
       },
     ],
   },
