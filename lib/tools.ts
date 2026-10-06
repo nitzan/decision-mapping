@@ -5,6 +5,9 @@ export type Tool = {
   href: string;
   external?: boolean;
   download?: boolean;
+  slug?: string;
+  file?: string;
+  preview?: string;
   from?: string;
 };
 
@@ -63,7 +66,10 @@ export const FOLDERS: Folder[] = [
         kind: "Worksheet · PDF",
         about:
           "Move from data to information to knowledge. One open field for data, then four cells each for how it is configured and the value in each configuration.",
-        href: "/worksheets/levels-of-structure.pdf",
+        href: "/worksheets/levels-of-structure",
+        slug: "levels-of-structure",
+        file: "/worksheets/levels-of-structure.pdf",
+        preview: "/worksheets/levels-of-structure.jpg",
         download: true,
       },
       {
@@ -71,14 +77,20 @@ export const FOLDERS: Folder[] = [
         kind: "Worksheet · PDF",
         about:
           "Map the places where practice and communication actually happen: synchronous and asynchronous, who is there, and what happens there.",
-        href: "/worksheets/space-worksheet.pdf",
+        href: "/worksheets/space-worksheet",
+        slug: "space-worksheet",
+        file: "/worksheets/space-worksheet.pdf",
+        preview: "/worksheets/space-worksheet.jpg",
         download: true,
       },
       {
         name: "Practice Notebook",
         kind: "Worksheet · PDF",
         about: "A page for naming and tracking your practices: what, who with, how often, and where.",
-        href: "/worksheets/practice-notebook.pdf",
+        href: "/worksheets/practice-notebook",
+        slug: "practice-notebook",
+        file: "/worksheets/practice-notebook.pdf",
+        preview: "/worksheets/practice-notebook.jpg",
         download: true,
       },
     ],

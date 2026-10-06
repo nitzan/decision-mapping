@@ -197,3 +197,20 @@ textarea.field { resize: vertical; }
 .folder-more { margin-top: 22px; color: var(--c3); font-size: 0.92rem; }
 .index-row { grid-template-rows: auto; }
 .index-open { grid-row: 1 / span 4; }
+
+/* worksheet page + email gate */
+.sheet-page { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 420px); gap: 48px; align-items: start; padding-top: 40px; }
+@media (max-width: 860px) { .sheet-page { grid-template-columns: 1fr; gap: 28px; } }
+.sheet-copy { min-width: 0; max-width: 560px; }
+.sheet-copy .index-kind { margin-bottom: 14px; }
+.sheet-about { margin-bottom: 26px; }
+.sheet-preview { margin: 0; }
+.sheet-preview img { width: 100%; max-width: 100%; height: auto; display: block; border: 1px solid var(--hair); background: #fff; }
+.sheet-preview figcaption { font-size: 0.82rem; color: var(--c3); margin-top: 8px; }
+.gate { display: flex; flex-direction: column; gap: 12px; border-top: 1px solid var(--line); padding-top: 18px; }
+.gate-lead { color: var(--c2); max-width: 46ch; }
+.gate-field { display: flex; flex-direction: column; gap: 6px; font-size: 0.9rem; }
+.gate-btn { align-self: flex-start; display: inline-block; }
+.gate-note { font-size: 0.9rem; color: var(--c3); }
+.gate-error { color: var(--clay); }
+.gate-trap { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }

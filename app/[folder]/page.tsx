@@ -28,11 +28,11 @@ export default async function FolderPage({ params }: { params: Promise<{ folder:
         <ul className="index-list">
           {f.tools.map((t) => (
             <li key={t.href}>
-              <a className="index-row" href={t.href} {...(t.external || t.download ? { target: "_blank", rel: "noreferrer" } : {})}>
+              <a className="index-row" href={t.href} {...(t.external ? { target: "_blank", rel: "noreferrer" } : {})}>
                 <span className="index-name">{t.name}</span>
                 <span className="index-kind">{t.from ? `${t.kind} · ${t.from}` : t.kind}</span>
                 <span className="index-about">{t.about}</span>
-                <span className="index-open">{t.download ? "Open PDF" : t.external ? "Open in a new tab" : "Open the tool"}</span>
+                <span className="index-open">{t.download ? "Preview and download" : t.external ? "Open in a new tab" : "Open the tool"}</span>
               </a>
             </li>
           ))}
