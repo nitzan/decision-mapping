@@ -444,7 +444,7 @@ export default function SeatsAtTheTableDecisionMapper() {
           <span className="brand-title">Seats at the Table</span>
           <span className="brand-sub">Decision journey mapping</span>
         </div>
-        <span className="byline">Nitzan Hermon</span>
+        <a className="byline" href="https://in-process.net" target="_blank" rel="noreferrer">Nitzan Hermon</a>
       </header>
 
       <div className="decision">
@@ -487,9 +487,9 @@ export default function SeatsAtTheTableDecisionMapper() {
 
             {/* chip */}
             <g transform="translate(28 28)">
-              <rect width={stepInfo.chip.length * 10.6 + 30} height={38} rx={8} className="chip" />
-              <text x={14} y={25} className="chip-text">
-                {stepInfo.chip}
+              <rect width={stepInfo.chip.length * 9.4 + 28} height={32} rx={3} className="chip" />
+              <text x={14} y={21} className="chip-text">
+                {stepInfo.chip.toUpperCase()}
               </text>
             </g>
 
@@ -687,6 +687,7 @@ export default function SeatsAtTheTableDecisionMapper() {
 
         {/* ------------------------------------------------ the prompt */}
         <aside className="panel" aria-live="polite">
+          <div className="eyebrow">Step {step} of 6</div>
           <h2 className="panel-title">{stepInfo.name}</h2>
 
           {step === 1 && (
