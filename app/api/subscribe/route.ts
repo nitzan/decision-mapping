@@ -27,7 +27,7 @@ export async function POST(req: Request) {
         email,
         name: (body.name || "").slice(0, 80) || undefined,
         emailType: "signup",
-        labels: ["Tools: worksheet download", worksheet ? `Worksheet: ${worksheet}` : undefined].filter(Boolean),
+        labels: ["Source: Tools", worksheet ? `Worksheet: ${worksheet}` : undefined].filter(Boolean),
         integrityToken,
         urlHistory: [{ path: "/tools/worksheets", time: Date.now(), referrerSource: "tools.criticalbusinessschool.com" }],
       }),
