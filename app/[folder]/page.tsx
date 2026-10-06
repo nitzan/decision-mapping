@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { FOLDERS } from "@/lib/tools";
-import { ToolsHeader, ToolsFooter } from "@/components/ToolsChrome";
 
 export const dynamicParams = false;
 export function generateStaticParams() {
@@ -19,8 +18,7 @@ export default async function FolderPage({ params }: { params: Promise<{ folder:
   const f = FOLDERS.find((x) => x.slug === folder);
   if (!f) notFound();
   return (
-    <div className="mat">
-      <ToolsHeader folder={f} />
+    <div className="mat mat-narrow">
       <main className="index">
         <a className="back" href="/">All tools</a>
         <h1 className="index-title">{f.name}</h1>
@@ -43,7 +41,6 @@ export default async function FolderPage({ params }: { params: Promise<{ folder:
           </p>
         )}
       </main>
-      <ToolsFooter />
     </div>
   );
 }

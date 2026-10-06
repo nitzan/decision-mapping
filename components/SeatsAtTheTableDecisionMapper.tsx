@@ -439,16 +439,7 @@ export default function SeatsAtTheTableDecisionMapper() {
   // ------------------------------------------------ render
   return (
     <div className="mat">
-      <header className="top">
-        <div className="brand">
-          <a className="brand-title" href="https://www.criticalbusinessschool.com">Critical Business School</a>
-          <a className="brand-sub" href="/">Tools</a>
-          <a className="brand-sub crumb" href="/in-process">In Process</a>
-        </div>
-        <a className="byline" href="https://in-process.net" target="_blank" rel="noreferrer">Nitzan Hermon</a>
-      </header>
-
-      <div className="tool-name">Seats at the Table: decision journey mapping</div>
+      <div className="tool-name"><a href="/">Tools</a> / <a href="/in-process">In Process</a> / Seats at the Table</div>
 
       <div className="decision decision-under-name">
         <label htmlFor="decision-title" className="sr-only">
@@ -685,6 +676,7 @@ export default function SeatsAtTheTableDecisionMapper() {
             <button className="link" onClick={startOver}>
               Start a new map
             </button>
+            <span className="saved-note">Your map is saved in this browser only.</span>
           </div>
         </section>
 
@@ -935,14 +927,6 @@ export default function SeatsAtTheTableDecisionMapper() {
         </aside>
       </main>
 
-      <footer className="foot">
-        <span>
-          <a href="https://in-process.net" target="_blank" rel="noreferrer">
-            In Process Coaching
-          </a>
-        </span>
-        <span>Your map is saved in this browser only.</span>
-      </footer>
     </div>
   );
 }

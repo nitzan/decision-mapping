@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { FOLDERS } from "@/lib/tools";
-import { ToolsHeader, ToolsFooter } from "@/components/ToolsChrome";
 
 export const metadata: Metadata = {
   title: "Tools — Critical Business School",
@@ -9,8 +8,7 @@ export const metadata: Metadata = {
 
 export default function Index() {
   return (
-    <div className="mat">
-      <ToolsHeader />
+    <div className="mat mat-narrow">
       <main className="index">
         <h1 className="index-title">Tools</h1>
         <p className="index-lede">Methods and exercises from the program, made usable on their own.</p>
@@ -28,7 +26,6 @@ export default function Index() {
           ))}
         </ul>
       </main>
-      <ToolsFooter />
     </div>
   );
 }

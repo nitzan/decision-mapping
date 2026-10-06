@@ -3,6 +3,7 @@
 const FILES = new Set([
   "Atlas-Grotesk-Regular.woff2",
   "Atlas-Grotesk-Bold.woff2",
+  "BerlingskeSerifXCn-Bd.woff2",
 ]);
 
 export async function GET(_req: Request, ctx: { params: Promise<{ file: string }> }) {

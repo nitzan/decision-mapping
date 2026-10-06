@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { FOLDERS } from "@/lib/tools";
-import { ToolsHeader, ToolsFooter } from "@/components/ToolsChrome";
 import EmailGate from "@/components/EmailGate";
 
 export const dynamicParams = false;
@@ -27,8 +26,7 @@ export default async function ToolPage({ params }: { params: Promise<{ folder: s
   if (!hit) notFound();
   const { f, t } = hit;
   return (
-    <div className="mat">
-      <ToolsHeader folder={f} />
+    <div className="mat mat-narrow">
       <main className="sheet-page">
         <div className="sheet-copy">
           <a className="back" href={`/${f.slug}`}>{f.name}</a>
@@ -43,7 +41,6 @@ export default async function ToolPage({ params }: { params: Promise<{ folder: s
           <figcaption>Letter size, one page. Print and fill in by hand.</figcaption>
         </figure>
       </main>
-      <ToolsFooter />
     </div>
   );
 }
