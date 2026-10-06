@@ -1,11 +1,8 @@
-// Serves the Critical Business School typefaces from criticalbusinessschool.com on this origin,
+// Serves the Critical Business School typeface (Atlas Grotesk) from criticalbusinessschool.com on this origin,
 // since that site sends no CORS headers for its font files.
 const FILES = new Set([
   "Atlas-Grotesk-Regular.woff2",
   "Atlas-Grotesk-Bold.woff2",
-  "BerlingskeSerifXCn-Rg.woff2",
-  "BerlingskeSerifXCn-It.woff2",
-  "BerlingskeSerifXCn-Bd.woff2",
 ]);
 
 export async function GET(_req: Request, ctx: { params: Promise<{ file: string }> }) {
