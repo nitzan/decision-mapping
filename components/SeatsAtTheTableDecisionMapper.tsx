@@ -780,7 +780,7 @@ export default function SeatsAtTheTableDecisionMapper() {
           {step === 4 && (
             <>
               <p className="prompt">Within this constellation, is there an ideal region you would like to exist? What is the range of balance you would like to live within?</p>
-              <p className="hint">It need not be a perfect circle. It can be jagged and prioritize one aspect of the decision. Drag the red points on the page; the black stroke on each line is how much give you have.</p>
+              <p className="hint">It need not be a perfect circle. It can be jagged and prioritize one aspect of the decision. Drag the points on the page; the dark stroke along each line is how much give you have.</p>
               {seated.length < 3 && <p className="note">Seat at least three aspects to see the region as a shape.</p>}
               <ul className="list">
                 {seated.map((a) => (
