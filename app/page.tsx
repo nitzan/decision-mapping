@@ -1,52 +1,34 @@
 import type { Metadata } from "next";
+import { FOLDERS } from "@/lib/tools";
+import { ToolsHeader, ToolsFooter } from "@/components/ToolsChrome";
 
 export const metadata: Metadata = {
   title: "Tools — Critical Business School",
   description: "Working tools from Critical Business School, a design and leadership program in New York City and online.",
 };
 
-const TOOLS = [
-  {
-    href: "/decisions",
-    name: "Seats at the Table",
-    kind: "Decision journey mapping",
-    about:
-      "List what a decision touches, draw each part as a line between two values, set the balance you want to live within, and see where your options land. Take a snapshot whenever the camera moves.",
-  },
-];
-
 export default function Index() {
   return (
     <div className="mat">
-      <header className="top">
-        <div className="brand">
-          <a className="brand-title" href="https://www.criticalbusinessschool.com">Critical Business School</a>
-          <span className="brand-sub">Tools</span>
-        </div>
-        <a className="byline" href="https://www.criticalbusinessschool.com">criticalbusinessschool.com</a>
-      </header>
-
+      <ToolsHeader />
       <main className="index">
         <h1 className="index-title">Tools</h1>
-        <p className="index-lede">Methods from the program, made usable on their own. Your work stays in your browser.</p>
+        <p className="index-lede">Methods and exercises from the program, made usable on their own.</p>
         <ul className="index-list">
-          {TOOLS.map((t) => (
-            <li key={t.href}>
-              <a className="index-row" href={t.href}>
-                <span className="index-name">{t.name}</span>
-                <span className="index-kind">{t.kind}</span>
-                <span className="index-about">{t.about}</span>
-                <span className="index-open">Open the tool</span>
+          {FOLDERS.map((f) => (
+            <li key={f.slug}>
+              <a className="index-row" href={`/${f.slug}`}>
+                <span className="index-name folder-name">{f.name}</span>
+                <span className="index-kind">{f.tools.length === 1 ? "1 tool" : `${f.tools.length} tools`}</span>
+                <span className="index-about">{f.about}</span>
+                <span className="folder-contents">{f.tools.map((t) => t.name).join(", ")}</span>
+                <span className="index-open">Open folder</span>
               </a>
             </li>
           ))}
         </ul>
       </main>
-
-      <footer className="foot">
-        <a href="https://www.criticalbusinessschool.com">Critical Business School</a>
-        <span>New York City and online</span>
-      </footer>
+      <ToolsFooter />
     </div>
   );
 }

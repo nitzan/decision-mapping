@@ -443,6 +443,7 @@ export default function SeatsAtTheTableDecisionMapper() {
         <div className="brand">
           <a className="brand-title" href="https://www.criticalbusinessschool.com">Critical Business School</a>
           <a className="brand-sub" href="/">Tools</a>
+          <a className="brand-sub crumb" href="/in-process">In Process</a>
         </div>
         <a className="byline" href="https://in-process.net" target="_blank" rel="noreferrer">Nitzan Hermon</a>
       </header>
