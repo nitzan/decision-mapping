@@ -441,13 +441,15 @@ export default function SeatsAtTheTableDecisionMapper() {
     <div className="mat">
       <header className="top">
         <div className="brand">
-          <span className="brand-title">Seats at the Table</span>
-          <span className="brand-sub">Decision journey mapping</span>
+          <a className="brand-title" href="https://www.criticalbusinessschool.com">Critical Business School</a>
+          <a className="brand-sub" href="/">Tools</a>
         </div>
         <a className="byline" href="https://in-process.net" target="_blank" rel="noreferrer">Nitzan Hermon</a>
       </header>
 
-      <div className="decision">
+      <div className="tool-name">Seats at the Table: decision journey mapping</div>
+
+      <div className="decision decision-under-name">
         <label htmlFor="decision-title" className="sr-only">
           What are you deciding?
         </label>

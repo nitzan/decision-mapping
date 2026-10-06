@@ -46,7 +46,9 @@ body { font-family: var(--sans); font-size: 16px; line-height: 1.45; -webkit-fon
 .brand { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .brand-title { font-family: var(--serif); font-weight: 700; font-size: 1.3rem; line-height: 1; letter-spacing: -0.015em; }
 .brand-sub, .byline { color: var(--c3); font-size: 0.9rem; }
-.byline:hover { color: var(--c1); }
+.byline:hover, .brand-sub:hover { color: var(--c1); }
+.tool-name { margin-top: 26px; font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--c3); }
+.decision.decision-under-name { margin-top: 6px; }
 
 .decision { margin: 30px 0 18px; }
 .decision-input {
@@ -172,3 +174,18 @@ textarea.field { resize: vertical; }
   .work { display: block; }
   .hit, .end-handle, .value-handle { display: none; }
 }
+
+/* tools index */
+.index { max-width: 760px; padding-top: 40px; }
+.index-title { font-weight: 700; font-size: clamp(2.2rem, 5vw, 3.3rem); letter-spacing: -0.025em; line-height: 1.05; margin-bottom: 12px; }
+.index-lede { font-size: 1.12rem; color: var(--c2); max-width: 52ch; margin-bottom: 32px; }
+.index-list { border-top: 1px solid var(--line); }
+.index-list li { border-bottom: 1px solid var(--hair); }
+.index-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 24px; padding: 20px 0; }
+.index-name { font-weight: 700; font-size: 1.35rem; letter-spacing: -0.015em; }
+.index-kind { grid-column: 1; font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--c3); }
+.index-about { grid-column: 1; color: var(--c2); max-width: 60ch; margin-top: 6px; }
+.index-open { grid-column: 2; grid-row: 1 / span 3; align-self: center; background: var(--lavender); border: 1px solid var(--lavender-deep); border-radius: 6px; padding: 9px 16px; font-weight: 700; white-space: nowrap; }
+.index-row:hover .index-open { background: var(--lavender-deep); }
+.index-row:hover .index-name { text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
+@media (max-width: 560px) { .index-row { grid-template-columns: 1fr; } .index-open { grid-column: 1; grid-row: auto; justify-self: start; margin-top: 10px; } }
