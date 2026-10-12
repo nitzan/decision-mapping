@@ -27,7 +27,7 @@ export function SiteHeader() {
           </div>
           <div className="hd-row hd-row--nav">
             <nav className="hd-tabs" aria-label="Main">
-              <a href={`${CBS}/about/`}>Program</a>
+              <a href={`${CBS}/program/`}>Program</a>
               <a href={`${CBS}/events/`}>Events</a>
               <a href={`${CBS}/read/`}>Writing</a>
               <a href={`${CBS}/library/`} aria-current="page">
@@ -67,15 +67,15 @@ export function SiteFooter() {
           <a className="foot-brand" href={CBS}>
             Critical Business School
           </a>
-          <p className="foot-lede">A design and leadership program, in person and online, based in New York City.</p>
+          <p className="foot-lede">A practitioner-led school for creative and strategic work, based in New York City.</p>
           <a className="foot-cta" href={`${CBS}/#/portal/signup`}>
-            Subscribe <span aria-hidden="true">→</span>
+            Subscribe to Critical Business School <span aria-hidden="true">→</span>
           </a>
         </div>
         <div className="foot-cols">
           <nav className="foot-group" aria-label="School">
             <div className="foot-h">School</div>
-            <a href={`${CBS}/about/`}>Program</a>
+            <a href={`${CBS}/program/`}>Program</a>
             <a href={`${CBS}/events/`}>Events</a>
             <a href={`${CBS}/meetups/`}>Meetups</a>
             <a href={`${CBS}/ai-literacy-for-teams/`}>For teams</a>
@@ -114,7 +114,7 @@ export function SiteFooter() {
       <div className="foot-bottom">
         <span>&copy; 2026 Critical Business School</span>
         <a href={`${CBS}/privacy/`}>Privacy</a>
-        <a href={`${CBS}/about/`}>About</a>
+        <a href={`${CBS}/program/`}>About</a>
         <a className="foot-top-link" href="#top">
           Back to top <span aria-hidden="true">↑</span>
         </a>

@@ -20,7 +20,7 @@ export default async function FolderPage({ params }: { params: Promise<{ folder:
   return (
     <div className="mat mat-narrow">
       <main className="index">
-        <a className="back" href="/">All tools</a>
+        <a className="back" href="/">← All tools</a>
         <h1 className="index-title">{f.name}</h1>
         <p className="index-lede">{f.about}</p>
         <ul className="index-list">

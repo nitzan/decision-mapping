@@ -10,6 +10,7 @@ export default function Index() {
   return (
     <div className="mat mat-narrow">
       <main className="index">
+        <p className="index-eyebrow">Library</p>
         <h1 className="index-title">Tools</h1>
         <p className="index-lede">Methods and exercises from the program, made usable on their own.</p>
         <ul className="index-list">
